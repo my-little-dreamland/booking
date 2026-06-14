@@ -847,7 +847,7 @@
 </div>
 
 <script>
- const API_URL = "https://script.google.com/macros/s/AKfycby0GhVR1wk1a-eVFyMAX48h_iEtF6XBD-8TSIbfxkHncxuJn8TWzPtPg2xCAtF2Op4axQ/exec";
+  const API_URL = "https://script.google.com/macros/s/AKfycby0GhVR1wk1a-eVFyMAX48h_iEtF6XBD-8TSIbfxkHncxuJn8TWzPtPg2xCAtF2Op4axQ/exec";
   let selectedDate = null, selectedSlot = null;
 
   const nowLoc = new Date();
@@ -978,6 +978,11 @@
     const errEl = document.getElementById('error-msg-ticket');
     errEl.style.display = 'none';
 
+    if (!validateTicketChildCount(true)) {
+      updateTicketEstimate();
+      return;
+    }
+
     if (!document.getElementById('estimate-ack').checked) {
       errEl.textContent = 'Please acknowledge that this is an estimated total before continuing.';
       errEl.style.display = 'block';
@@ -1033,12 +1038,68 @@
     document.getElementById('ticket-capacity-count').textContent = children === '5' ? '5+ children for capacity' : children + ' child' + (children === '1' ? '' : 'ren') + ' for capacity';
   }
 
-  function syncTicketDefaultsFromDetails() {
-    const children = parseInt(document.getElementById('f-children').value, 10) || 1;
-    const standardQty = document.getElementById('standard-qty');
-    if (standardQty && getRadioValue('ticket-type') === 'standard') {
-      standardQty.value = String(Math.min(Math.max(children, 1), 5));
+  function getBookingChildrenCount() {
+    return parseInt(document.getElementById('f-children').value, 10) || 0;
+  }
+
+  function getTicketChildCount() {
+    const type = getRadioValue('ticket-type') || 'standard';
+    let count = 0;
+
+    if (type === 'baby') {
+      count += getQty('baby-qty');
     }
+
+    if (type === 'standard') {
+      count += getQty('standard-qty');
+    }
+
+    if (type === 'family') {
+      const size = document.getElementById('family-size').value;
+      count += size === 'three' ? 3 : 2;
+    }
+
+    count += getQty('addon-babies');
+    count += getQty('addon-older');
+
+    return count;
+  }
+
+  function syncTicketDefaultsFromDetails() {
+    const children = Math.min(Math.max(getBookingChildrenCount(), 1), 5);
+    const type = getRadioValue('ticket-type') || 'standard';
+
+    const babyQty = document.getElementById('baby-qty');
+    const standardQty = document.getElementById('standard-qty');
+    const familySize = document.getElementById('family-size');
+
+    if (type === 'baby' && babyQty) {
+      babyQty.value = String(children);
+    }
+
+    if (type === 'standard' && standardQty) {
+      standardQty.value = String(children);
+    }
+
+    if (type === 'family' && familySize) {
+      familySize.value = children >= 3 ? 'three' : 'two';
+    }
+  }
+
+  function validateTicketChildCount(showError) {
+    const bookingChildren = getBookingChildrenCount();
+    const ticketChildren = getTicketChildCount();
+    const errEl = document.getElementById('error-msg-ticket');
+
+    if (bookingChildren !== ticketChildren) {
+      if (showError && errEl) {
+        errEl.textContent = 'Please make sure the ticket children total matches the number of children selected in Your details. You selected ' + bookingChildren + ' child' + (bookingChildren === 1 ? '' : 'ren') + ' in Your details, but your ticket selection currently counts ' + ticketChildren + '.';
+        errEl.style.display = 'block';
+      }
+      return false;
+    }
+
+    return true;
   }
 
   function updateFamilyPriceLabels() {
@@ -1132,15 +1193,34 @@
     const breakdown = document.getElementById('ticket-breakdown');
     if (!breakdown) return;
 
+    const bookingChildren = getBookingChildrenCount();
+    const ticketChildren = getTicketChildCount();
+    const countMatches = bookingChildren === ticketChildren;
+    const countColor = countMatches ? '#1A1714' : '#B91C1C';
+
     breakdown.innerHTML = estimate.lines.map(line => {
       return `<div class="ticket-breakdown-row"><span>${line.label}</span><strong>${money(line.amount)}</strong></div>`;
-    }).join('');
+    }).join('') + `
+      <div class="ticket-breakdown-row" style="border-top:1px dashed #ffe3e8;padding-top:9px;margin-top:9px;">
+        <span>Children selected in details</span><strong>${bookingChildren}</strong>
+      </div>
+      <div class="ticket-breakdown-row">
+        <span>Children counted in tickets</span><strong style="color:${countColor}">${ticketChildren}</strong>
+      </div>
+    `;
 
     document.getElementById('ticket-total').textContent = money(estimate.total);
   }
 
   function initTicketCalculator() {
-    document.querySelectorAll('input[name="ticket-type"], input[name="baby-mode"], input[name="standard-session"], input[name="family-session"]').forEach(el => {
+    document.querySelectorAll('input[name="ticket-type"]').forEach(el => {
+      el.addEventListener('change', () => {
+        syncTicketDefaultsFromDetails();
+        updateTicketVisibility();
+      });
+    });
+
+    document.querySelectorAll('input[name="baby-mode"], input[name="standard-session"], input[name="family-session"]').forEach(el => {
       el.addEventListener('change', updateTicketVisibility);
     });
 
