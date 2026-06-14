@@ -620,8 +620,9 @@
           <option value="2">2 Children</option>
           <option value="3">3 Children</option>
           <option value="4">4 Children</option>
-          <option value="5">5+ Children</option>
+          <option value="5">5 Children</option>
         </select>
+        <div class="card-sub" id="children-availability-note" style="margin-top:8px;margin-bottom:0;"></div>
       </div>
     </div>
     <button class="btn btn-primary" id="btn-next-2">Continue to tickets</button>
@@ -863,8 +864,46 @@
   const dateInput = document.getElementById('date-input');
   dateInput.min = todayStr; dateInput.value = todayStr;
 
+  function updateChildrenOptionsForSelectedSlot() {
+    const select = document.getElementById('f-children');
+    const note = document.getElementById('children-availability-note');
+    if (!select) return;
+
+    const currentValue = select.value;
+    const remaining = selectedSlot ? (parseInt(selectedSlot.remaining, 10) || 0) : 5;
+    const maxChildren = Math.max(0, Math.min(remaining, 5));
+
+    select.innerHTML = '<option value="">Select...</option>';
+
+    for (let i = 1; i <= maxChildren; i++) {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = i === 1 ? '1 Child' : i + ' Children';
+      select.appendChild(opt);
+    }
+
+    select.disabled = maxChildren === 0;
+
+    if (currentValue && parseInt(currentValue, 10) <= maxChildren) {
+      select.value = currentValue;
+    } else {
+      select.value = '';
+    }
+
+    if (note) {
+      if (selectedSlot) {
+        note.textContent = remaining + ' spot' + (remaining === 1 ? '' : 's') + ' available for this selected entry time.';
+      } else {
+        note.textContent = '';
+      }
+    }
+  }
+
   dateInput.addEventListener('change', () => {
-    selectedSlot = null; document.getElementById('btn-next-1').disabled = true; loadSlots(dateInput.value);
+    selectedSlot = null;
+    document.getElementById('btn-next-1').disabled = true;
+    updateChildrenOptionsForSelectedSlot();
+    loadSlots(dateInput.value);
   });
 
   async function loadSlots(date) {
@@ -930,6 +969,7 @@
             document.querySelectorAll('.slot-item').forEach(i => i.classList.remove('selected'));
             item.classList.add('selected');
             selectedSlot = slot;
+            updateChildrenOptionsForSelectedSlot();
             document.getElementById('btn-next-1').disabled = false;
           });
         }
@@ -965,6 +1005,15 @@
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       errEl.textContent = 'Please enter a valid email address.';
       errEl.style.display = 'block';
+      return;
+    }
+
+    const selectedChildren = parseInt(children, 10);
+    const remainingForSlot = selectedSlot ? (parseInt(selectedSlot.remaining, 10) || 0) : 0;
+    if (!selectedSlot || selectedChildren > remainingForSlot) {
+      errEl.textContent = 'This entry time only has ' + remainingForSlot + ' spot' + (remainingForSlot === 1 ? '' : 's') + ' available. Please choose a smaller number of children or pick another time.';
+      errEl.style.display = 'block';
+      updateChildrenOptionsForSelectedSlot();
       return;
     }
 
@@ -1244,6 +1293,12 @@
   document.getElementById('btn-submit').addEventListener('click', async () => {
     const errEl = document.getElementById('error-msg-3'); errEl.style.display = 'none';
     const num = parseInt(document.getElementById('f-children').value);
+    const remainingForSlot = selectedSlot ? (parseInt(selectedSlot.remaining, 10) || 0) : 0;
+    if (!selectedSlot || num > remainingForSlot) {
+      errEl.textContent = 'This entry time only has ' + remainingForSlot + ' spot' + (remainingForSlot === 1 ? '' : 's') + ' available. Please go back and choose a smaller number of children or another time.';
+      errEl.style.display = 'block';
+      return;
+    }
     let childNotesArr = [];
     
     for(let i=1; i<=num; i++) {
@@ -1312,6 +1367,7 @@
       else el.value = '0';
     });
     updateTicketVisibility();
+    updateChildrenOptionsForSelectedSlot();
     dateInput.value = todayStr; loadSlots(todayStr); goToScreen(1);
   }
 
