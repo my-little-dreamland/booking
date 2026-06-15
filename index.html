@@ -663,7 +663,7 @@
           <input type="radio" name="ticket-type" value="baby">
           <div>
             <div class="ticket-radio-title">Baby ticket</div>
-            <div class="ticket-radio-sub">Age 0–1. Day pass is $3.80. One baby is free when attending with another paid child ticket; additional babies are charged as paid baby day passes.</div>
+            <div class="ticket-radio-sub">Age 0–1. Standalone baby day pass is $3.80. If your baby is attending with a paid standard child ticket or family pass, use the Babies add-on below.</div>
           </div>
         </label>
         <label class="ticket-radio-card">
@@ -691,10 +691,9 @@
             </select>
           </div>
           <div>
-            <label class="ticket-mini-label">Baby pricing</label>
-            <div class="ticket-session-options">
-              <label><span><input type="radio" name="baby-mode" value="paid" checked> Standalone baby day pass</span><span class="ticket-price-tag">$3.80</span></label>
-              <label><span><input type="radio" name="baby-mode" value="free"> With another paid child ticket</span><span class="ticket-price-tag">1st baby free</span></label>
+            <label class="ticket-mini-label">Baby ticket price</label>
+            <div class="ticket-note" style="margin:0;">
+              Standalone baby day pass is <strong>$3.80 each</strong>. Babies are only free when they attend with a paid standard child ticket or family pass.
             </div>
           </div>
         </div>
@@ -742,12 +741,12 @@
 
       <div class="ticket-section-title">Extra guests add-ons</div>
       <div class="ticket-note">
-        Extra guests add-ons apply with any baby or standard child ticket on the same visit.<br>
-        <strong>Babies:</strong> Age 0–1 when with another paid child ticket: <strong>Free for the first baby.</strong> Additional babies are charged as paid baby day passes ($3.80 each).
+        Extra guests add-ons apply with any standard child ticket or family pass on the same visit.<br>
+        <strong>Babies:</strong> Age 0–1 with a paid standard child ticket or family pass: <strong>free for the first baby.</strong> Additional babies are charged as paid baby day passes ($3.80 each).
       </div>
       <div class="ticket-panel active">
-        <div class="ticket-addon-row">
-          <div><div class="ticket-addon-title">Babies</div><div class="ticket-addon-sub">Age 0–1 when with another paid child ticket: first baby free. Additional babies are charged $3.80 each.</div></div>
+        <div class="ticket-addon-row" id="addon-baby-row">
+          <div><div class="ticket-addon-title">Babies</div><div class="ticket-addon-sub">Age 0–1 with a paid standard child ticket or family pass: first baby free. Additional babies are charged $3.80 each.</div></div>
           <select id="addon-babies" class="ticket-select"><option value="0">0</option><option value="1">1 baby</option><option value="2">2 babies</option><option value="3">3 babies</option><option value="4">4 babies</option><option value="5">5 babies</option></select>
         </div>
         <div class="ticket-addon-row">
@@ -1108,7 +1107,9 @@
       count += size === 'three' ? 3 : 2;
     }
 
-    count += getQty('addon-babies');
+    if (type !== 'baby') {
+      count += getQty('addon-babies');
+    }
     count += getQty('addon-older');
 
     return count;
@@ -1164,6 +1165,20 @@
       const panel = document.getElementById(`ticket-panel-${typeName}`);
       if (panel) panel.classList.toggle('active', typeName === type);
     });
+
+    const babyAddon = document.getElementById('addon-babies');
+    const babyAddonRow = document.getElementById('addon-baby-row');
+    if (babyAddon) {
+      if (type === 'baby') {
+        babyAddon.value = '0';
+        babyAddon.disabled = true;
+        if (babyAddonRow) babyAddonRow.style.opacity = '0.55';
+      } else {
+        babyAddon.disabled = false;
+        if (babyAddonRow) babyAddonRow.style.opacity = '1';
+      }
+    }
+
     updateFamilyPriceLabels();
     updateTicketEstimate();
   }
@@ -1175,14 +1190,9 @@
 
     if (type === 'baby') {
       const qty = getQty('baby-qty');
-      const mode = getRadioValue('baby-mode') || 'paid';
-      const paidBabyQty = mode === 'free' ? Math.max(0, qty - 1) : qty;
-      const amount = paidBabyQty * TICKET_PRICES.baby;
+      const amount = qty * TICKET_PRICES.baby;
       total += amount;
-      const label = mode === 'free'
-        ? qty + ' baby ticket' + (qty > 1 ? 's' : '') + ' with paid child ticket — first baby free'
-        : qty + ' baby day pass' + (qty > 1 ? 'es' : '');
-      lines.push({ label, amount });
+      lines.push({ label: qty + ' standalone baby day pass' + (qty > 1 ? 'es' : ''), amount });
     }
 
     if (type === 'standard') {
@@ -1204,14 +1214,14 @@
       lines.push({ label: 'Family pass — ' + kidsLabel + ' — ' + sessionLabel, amount });
     }
 
-    const babyAddons = getQty('addon-babies');
+    const babyAddons = type === 'baby' ? 0 : getQty('addon-babies');
     if (babyAddons > 0) {
       const paidBabyAddons = Math.max(0, babyAddons - 1);
       const amount = paidBabyAddons * TICKET_PRICES.baby;
       total += amount;
       const label = babyAddons === 1
-        ? '1 baby add-on with paid child ticket — free'
-        : babyAddons + ' baby add-ons with paid child ticket — first baby free, ' + paidBabyAddons + ' paid';
+        ? '1 baby add-on with paid standard/family ticket — free'
+        : babyAddons + ' baby add-ons with paid standard/family ticket — first baby free, ' + paidBabyAddons + ' paid';
       lines.push({ label, amount });
     }
 
@@ -1267,7 +1277,7 @@
       });
     });
 
-    document.querySelectorAll('input[name="baby-mode"], input[name="standard-session"], input[name="family-session"]').forEach(el => {
+    document.querySelectorAll('input[name="standard-session"], input[name="family-session"]').forEach(el => {
       el.addEventListener('change', updateTicketVisibility);
     });
 
@@ -1355,7 +1365,6 @@
     document.getElementById('estimate-ack').checked = false;
     document.querySelector('input[name="ticket-type"][value="standard"]').checked = true;
     document.querySelector('input[name="standard-session"][value="one"]').checked = true;
-    document.querySelector('input[name="baby-mode"][value="paid"]').checked = true;
     document.querySelector('input[name="family-session"][value="one"]').checked = true;
     ['baby-qty','standard-qty','family-size','addon-babies','addon-older','addon-adults'].forEach(id => {
       const el = document.getElementById(id);
