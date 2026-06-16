@@ -851,6 +851,7 @@
 
 <script>  const API_URL = "https://script.google.com/macros/s/AKfycby0GhVR1wk1a-eVFyMAX48h_iEtF6XBD-8TSIbfxkHncxuJn8TWzPtPg2xCAtF2Op4axQ/exec";
   let selectedDate = null, selectedSlot = null;
+  let selectedCloseTime = null;
 
   const nowLoc = new Date();
   const melbStr = nowLoc.toLocaleString("en-US", { timeZone: "Australia/Melbourne" });
@@ -902,6 +903,7 @@
 
   dateInput.addEventListener('change', () => {
     selectedSlot = null;
+    selectedCloseTime = null;
     document.getElementById('btn-next-1').disabled = true;
     updateChildrenOptionsForSelectedSlot();
     loadSlots(dateInput.value);
@@ -914,6 +916,7 @@
     try {
       const res = await fetch(`${API_URL}?action=getSlots&date=${date}`);
       const data = await res.json();
+      selectedCloseTime = data.closeTime || getCloseTimeForDate(date);
       renderSlots(data.groupedSlots); 
     } catch (e) {
       container.innerHTML = '<div class="slots-loading" style="color:#B91C1C">Could not load times. Please try again.</div>';
@@ -1020,6 +1023,7 @@
 
     updateTicketSummaryFromBooking();
     syncTicketDefaultsFromDetails();
+    updateTicketDurationAvailability();
     updateTicketEstimate();
     goToScreen(3);
   });
@@ -1027,6 +1031,13 @@
   document.getElementById('btn-next-3').addEventListener('click', () => {
     const errEl = document.getElementById('error-msg-ticket');
     errEl.style.display = 'none';
+
+    updateTicketDurationAvailability();
+
+    if (!validateTicketDuration(true, 'error-msg-ticket')) {
+      updateTicketEstimate();
+      return;
+    }
 
     if (!validateTicketChildCount(true)) {
       updateTicketEstimate();
@@ -1077,11 +1088,132 @@
     return checked ? checked.value : '';
   }
 
+  function getDayOfWeekFromDateString(date) {
+    if (!date) return 1;
+    const parts = String(date).split('-').map(Number);
+    if (parts.length !== 3 || parts.some(isNaN)) return 1;
+    return new Date(Date.UTC(parts[0], parts[1] - 1, parts[2])).getUTCDay();
+  }
+
+  function getCloseTimeForDate(date) {
+    const day = getDayOfWeekFromDateString(date);
+
+    // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    if (day >= 1 && day <= 5) return '17:00';
+    if (day === 6) return '16:00';
+    return '14:00';
+  }
+
+  function getCloseTimeForSelectedDate() {
+    return selectedCloseTime || getCloseTimeForDate(selectedDate || dateInput.value);
+  }
+
+  function timeToMinutes(timeStr) {
+    const parts = String(timeStr || '00:00').split(':').map(Number);
+    return (parts[0] || 0) * 60 + (parts[1] || 0);
+  }
+
+  function minutesToTime(minutes) {
+    const h = Math.floor(minutes / 60).toString().padStart(2, '0');
+    const m = (minutes % 60).toString().padStart(2, '0');
+    return h + ':' + m;
+  }
+
+  function getSelectedTicketDurationMinutes() {
+    if (!selectedSlot) return 60;
+
+    const type = getRadioValue('ticket-type') || 'standard';
+    const closeMinutes = timeToMinutes(getCloseTimeForSelectedDate());
+    const startMinutes = timeToMinutes(selectedSlot.start);
+    const remainingTodayMinutes = Math.max(60, closeMinutes - startMinutes);
+
+    if (type === 'baby') {
+      // Baby main ticket is a standalone baby day pass, from entry until closing.
+      return remainingTodayMinutes;
+    }
+
+    if (type === 'standard') {
+      const session = getRadioValue('standard-session') || 'one';
+      if (session === 'two') return 120;
+      if (session === 'all') return remainingTodayMinutes;
+      return 60;
+    }
+
+    if (type === 'family') {
+      const session = getRadioValue('family-session') || 'one';
+      if (session === 'two') return 120;
+      if (session === 'all') return remainingTodayMinutes;
+      return 60;
+    }
+
+    return 60;
+  }
+
+  function getSelectedTicketEndTime() {
+    if (!selectedSlot) return '';
+    const endMinutes = timeToMinutes(selectedSlot.start) + getSelectedTicketDurationMinutes();
+    const closeMinutes = timeToMinutes(getCloseTimeForSelectedDate());
+    return minutesToTime(Math.min(endMinutes, closeMinutes));
+  }
+
+  function isDurationAvailable(durationMinutes) {
+    if (!selectedSlot) return true;
+    const startMinutes = timeToMinutes(selectedSlot.start);
+    const closeMinutes = timeToMinutes(getCloseTimeForSelectedDate());
+    return startMinutes + durationMinutes <= closeMinutes;
+  }
+
+  function updateTicketDurationAvailability() {
+    const twoHourAvailable = isDurationAvailable(120);
+
+    ['standard-session', 'family-session'].forEach(name => {
+      const twoHourInput = document.querySelector(`input[name="${name}"][value="two"]`);
+      const oneHourInput = document.querySelector(`input[name="${name}"][value="one"]`);
+      if (!twoHourInput) return;
+
+      const twoHourLabel = twoHourInput.closest('label');
+      twoHourInput.disabled = !twoHourAvailable;
+
+      if (!twoHourAvailable && twoHourInput.checked && oneHourInput) {
+        oneHourInput.checked = true;
+      }
+
+      if (twoHourLabel) {
+        twoHourLabel.style.opacity = twoHourAvailable ? '1' : '0.45';
+        twoHourLabel.style.cursor = twoHourAvailable ? 'pointer' : 'not-allowed';
+        twoHourLabel.title = twoHourAvailable
+          ? ''
+          : '2 hours is not available for this entry time because it goes past closing time.';
+      }
+    });
+  }
+
+  function validateTicketDuration(showError, errorElementId) {
+    if (!selectedSlot) return true;
+
+    const durationMinutes = getSelectedTicketDurationMinutes();
+    const startMinutes = timeToMinutes(selectedSlot.start);
+    const closeMinutes = timeToMinutes(getCloseTimeForSelectedDate());
+
+    if (startMinutes + durationMinutes > closeMinutes) {
+      if (showError) {
+        const errEl = document.getElementById(errorElementId || 'error-msg-ticket');
+        if (errEl) {
+          errEl.textContent = 'This ticket duration goes past closing time. Please choose an earlier entry time or a shorter session.';
+          errEl.style.display = 'block';
+        }
+      }
+      return false;
+    }
+
+    return true;
+  }
+
   function updateTicketSummaryFromBooking() {
     const d = new Date(selectedDate + 'T00:00:00');
     document.getElementById('ticket-sum-date').textContent = d.toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
     document.getElementById('ticket-sum-entry').textContent = selectedSlot ? selectedSlot.start : '';
-    document.getElementById('ticket-sum-exit').textContent = selectedSlot ? selectedSlot.end : '';
+    document.getElementById('ticket-sum-exit').textContent = selectedSlot ? getSelectedTicketEndTime() : '';
     const children = document.getElementById('f-children').value || '0';
     document.getElementById('ticket-capacity-count').textContent = children === '5' ? '5+ children for capacity' : children + ' child' + (children === '1' ? '' : 'ren') + ' for capacity';
   }
@@ -1179,6 +1311,7 @@
       }
     }
 
+    updateTicketDurationAvailability();
     updateFamilyPriceLabels();
     updateTicketEstimate();
   }
@@ -1255,9 +1388,20 @@
     const countMatches = bookingChildren === ticketChildren;
     const countColor = countMatches ? '#1A1714' : '#B91C1C';
 
+    const sessionEnd = getSelectedTicketEndTime();
+    const closeTime = getCloseTimeForSelectedDate();
+    const twoHourAvailable = isDurationAvailable(120);
+
     breakdown.innerHTML = estimate.lines.map(line => {
       return `<div class="ticket-breakdown-row"><span>${line.label}</span><strong>${money(line.amount)}</strong></div>`;
     }).join('') + `
+      <div class="ticket-breakdown-row" style="border-top:1px dashed #ffe3e8;padding-top:9px;margin-top:9px;">
+        <span>Estimated session ends</span><strong>${sessionEnd || '-'}</strong>
+      </div>
+      <div class="ticket-breakdown-row">
+        <span>Venue closing time</span><strong>${closeTime}</strong>
+      </div>
+      ${!twoHourAvailable ? '<div style="margin-top:8px;font-size:12px;line-height:1.5;color:#B91C1C;background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:9px 10px;">2-hour tickets are not available for this entry time because they go past closing time.</div>' : ''}
       <div class="ticket-breakdown-row" style="border-top:1px dashed #ffe3e8;padding-top:9px;margin-top:9px;">
         <span>Children selected in details</span><strong>${bookingChildren}</strong>
       </div>
@@ -1267,6 +1411,8 @@
     `;
 
     document.getElementById('ticket-total').textContent = money(estimate.total);
+    const sumExit = document.getElementById('ticket-sum-exit');
+    if (sumExit) sumExit.textContent = sessionEnd || (selectedSlot ? selectedSlot.end : '');
   }
 
   function initTicketCalculator() {
@@ -1287,7 +1433,7 @@
     });
 
     const familySize = document.getElementById('family-size');
-    if (familySize) familySize.addEventListener('change', updateFamilyPriceLabels);
+    if (familySize) familySize.addEventListener('change', () => { updateFamilyPriceLabels(); updateTicketEstimate(); });
 
     updateTicketVisibility();
   }
@@ -1305,6 +1451,10 @@
     if (!selectedSlot || num > remainingForSlot) {
       errEl.textContent = 'This entry time only has ' + remainingForSlot + ' spot' + (remainingForSlot === 1 ? '' : 's') + ' available. Please go back and choose a smaller number of children or another time.';
       errEl.style.display = 'block';
+      return;
+    }
+
+    if (!validateTicketDuration(true, 'error-msg-3')) {
       return;
     }
     let childNotesArr = [];
@@ -1329,7 +1479,10 @@
       const params = new URLSearchParams({
         action: 'createBooking', date: selectedDate, slot: selectedSlot.key,
         parentName: name, parentEmail: email, parentPhone: phone,
-        numChildren: String(num), photoConsent, waiverSigned: 'yes', notes: compiledNotes
+        numChildren: String(num), photoConsent, waiverSigned: 'yes',
+        ticketDurationMinutes: String(getSelectedTicketDurationMinutes()),
+        ticketSessionEnd: getSelectedTicketEndTime(),
+        notes: compiledNotes
       });
       
       const res = await fetch(`${API_URL}?${params.toString()}`);
